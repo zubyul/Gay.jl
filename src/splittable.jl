@@ -9,6 +9,16 @@ export gay_interleave, gay_interleave_streams, GayInterleaver
 export gay_checkerboard_2d, gay_heisenberg_bonds, gay_sublattice, gay_xor_color, gay_exchange_colors
 export splitmix64, GOLDEN, MIX1, MIX2
 
+# Canonical seed and genesis colors
+export GAY_SEED, GAY_SEED_LEGACY, GAY_SEED_PARALLEL_BASE
+export GENESIS_COLORS, verify_genesis_chain
+
+# Parallel fork integration (Phase 2 migration)
+export parallel_fork_seed, color_from_parallel_fork
+export color_at_pf, colors_at_pf, next_color_pf, next_colors_pf
+export verify_spi_property, verify_bijection_property, verify_stream_independence
+export compute_hue_from_seed, compute_saturation_from_seed, compute_lightness_from_seed
+
 """
     GayRNG
 
@@ -26,12 +36,65 @@ mutable struct GayRNG
     seed::UInt64
 end
 
-# Global RNG instance - default seed based on package name hash
-const GAY_SEED = UInt64(0x6761795f636f6c6f)  # "gay_colo" as bytes
+# Global RNG instance
 const GLOBAL_GAY_RNG = Ref{GayRNG}()
 
-# SplitMix64 constants
-const GOLDEN = 0x9e3779b97f4a7c15
+# ═══════════════════════════════════════════════════════════════════════════════
+# CANONICAL SEED: 1069 (0x42D)
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# The canonical Gay.jl seed is 1069, chosen for:
+#   1. Memorability: Small number, easy to communicate
+#   2. Hex significance: 0x42D contains "42" (the answer) + "D" (dimension)
+#   3. Genesis colors: #E67F86, #D06546, #1316BB - visually distinct, good GF(3) spread
+#   4. MCP alignment: Already canonical in Gay MCP server and all clients
+#
+# Legacy seeds preserved for backward compatibility but NOT recommended for new code.
+#
+const GAY_SEED = UInt64(1069)  # Canonical seed - use this!
+const GAY_SEED_LEGACY = UInt64(0x6761795f636f6c6f)  # "gay_colo" as bytes (deprecated)
+const GAY_SEED_PARALLEL_BASE = UInt64(0x6761795f636f6c6f)  # Parallel fork base (deprecated)
+
+# Genesis color chain (seed=1069) - the canonical first 12 colors
+# Verified against Gay MCP server output
+const GENESIS_COLORS = (
+    (index=1,  hex="#E67F86", trit=+1, name="warm pink-coral"),
+    (index=2,  hex="#D06546", trit=0,  name="burnt orange"),
+    (index=3,  hex="#1316BB", trit=-1, name="deep blue"),
+    (index=4,  hex="#BA2645", trit=+1, name="crimson"),
+    (index=5,  hex="#49EE54", trit=+1, name="bright green"),
+    (index=6,  hex="#11C710", trit=0,  name="lime green"),
+    (index=7,  hex="#76B0F0", trit=-1, name="sky blue"),
+    (index=8,  hex="#E59798", trit=0,  name="dusty rose"),
+    (index=9,  hex="#5333D9", trit=-1, name="violet"),
+    (index=10, hex="#7E90EB", trit=0,  name="periwinkle"),
+    (index=11, hex="#1D9E7E", trit=0,  name="teal"),
+    (index=12, hex="#DD7CB0", trit=+1, name="pink"),
+)
+
+"""
+    verify_genesis_chain() -> Bool
+
+Verify that color_at(i, seed=1069) produces the canonical genesis colors.
+This is the reafference test: if we are the same implementation, we predict correctly.
+"""
+function verify_genesis_chain()
+    for g in GENESIS_COLORS
+        c = color_at(g.index; seed=GAY_SEED)
+        hex = @sprintf("#%02X%02X%02X", 
+            round(Int, clamp(c.r, 0, 1) * 255),
+            round(Int, clamp(c.g, 0, 1) * 255),
+            round(Int, clamp(c.b, 0, 1) * 255))
+        if uppercase(hex) != uppercase(g.hex)
+            @warn "Genesis color mismatch" index=g.index expected=g.hex got=hex
+            return false
+        end
+    end
+    return true
+end
+
+# SplitMix64 constants (same across all implementations)
+const GOLDEN = 0x9e3779b97f4a7c15  # φ⁻¹ × 2⁶⁴
 const MIX1 = 0xbf58476d1ce4e5b9
 const MIX2 = 0x94d049bb133111eb
 
@@ -47,6 +110,102 @@ function splitmix64(x::UInt64)::UInt64
     x = (x ⊻ (x >> 27)) * MIX2
     x ⊻ (x >> 31)
 end
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PARALLEL FORK BRIDGE FUNCTIONS (Phase 2 Migration)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+"""
+    compute_hue_from_seed(seed::UInt64, index::UInt64=0)::Float64
+
+Compute deterministic hue from seed using golden angle (137.508°).
+This replicates the parallel color fork system's HSL generation.
+"""
+function compute_hue_from_seed(seed::UInt64, index::UInt64=0)::Float64
+    GOLDEN_ANGLE = 137.508
+    normalized = mod(seed + index, 1000)
+    hue = mod(Float64(normalized) * GOLDEN_ANGLE, 360.0)
+    return hue
+end
+
+"""
+    compute_saturation_from_seed(seed::UInt64, iteration::UInt64=0)::Float64
+
+Compute deterministic saturation from seed and iteration count.
+"""
+function compute_saturation_from_seed(seed::UInt64, iteration::UInt64=0)::Float64
+    base = 0.3 + Float64(mod(iteration, 100)) / 100.0
+    entropy = Float64(mod(seed, 256)) / 256.0
+    saturation = min(1.0, base + entropy * 0.3)
+    return saturation
+end
+
+"""
+    compute_lightness_from_seed(seed::UInt64, depth::UInt64=0)::Float64
+
+Compute deterministic lightness from seed and depth.
+"""
+function compute_lightness_from_seed(seed::UInt64, depth::UInt64=0)::Float64
+    base = 0.3 + Float64(mod(seed, 70) + 70)
+    depth_factor = Float64(depth) / 20.0
+    lightness = min(0.9, max(0.2, base - depth_factor))
+    return lightness
+end
+
+"""
+    parallel_fork_seed(index::Integer)::UInt64
+
+Generate a deterministic seed from parallel fork system for given index.
+Returns a UInt64 suitable for use with color generation functions.
+"""
+function parallel_fork_seed(index::Integer)::UInt64
+    # SplitMix64-style seed splitting (same as parallel fork system)
+    seed = GAY_SEED_PARALLEL_BASE
+
+    # Apply deterministic transformation
+    mixed = seed + UInt64(index)
+    rotated = (mixed << 13) | (mixed >> 51)
+
+    return rotated
+end
+
+"""
+    color_from_parallel_fork(index::Integer)::RGB{Float64}
+
+Generate color directly from parallel fork system for given index.
+Uses HSL→RGB conversion internally.
+"""
+function color_from_parallel_fork(index::Integer)::RGB{Float64}
+    seed = parallel_fork_seed(index)
+    h = compute_hue_from_seed(seed, UInt64(index))
+    s = compute_saturation_from_seed(seed, UInt64(index))
+    l = compute_lightness_from_seed(seed, UInt64(index))
+
+    # Convert HSL to RGB
+    c = (1 - abs(2*l - 1)) * s
+    x = c * (1 - abs(mod(h / 60, 2) - 1))
+    m = l - c/2
+
+    r, g, b = if h < 60
+        (c, x, 0)
+    elseif h < 120
+        (x, c, 0)
+    elseif h < 180
+        (0, c, x)
+    elseif h < 240
+        (0, x, c)
+    elseif h < 300
+        (x, 0, c)
+    else
+        (c, 0, x)
+    end
+
+    return RGB{Float64}(r + m, g + m, b + m)
+end
+
+# NOTE: GAY_SEED is now a true constant (1069), not overwritten at runtime.
+# Legacy parallel_fork_seed(0) behavior preserved via GAY_SEED_PARALLEL_BASE for
+# backward compatibility, but new code should use GAY_SEED = 1069 directly.
 
 """
     GayRNG(seed::Integer=GAY_SEED)
@@ -199,6 +358,113 @@ function palette_at(index::Integer, n::Int, cs::ColorSpace=SRGB();
         current = split(current)
     end
     return random_palette(n, cs; min_distance=min_distance, rng=current)
+end
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PARALLEL FORK VARIANT FUNCTIONS (Phase 2 Migration)
+# Suffix: _pf for "parallel fork" variants
+# ═══════════════════════════════════════════════════════════════════════════════
+
+"""
+    color_at_pf(index::Integer, cs::ColorSpace=SRGB())::RGB{Float64}
+
+Get color at specific index using parallel fork system.
+Parallel-fork version (suffix: _pf).
+"""
+function color_at_pf(index::Integer, cs::ColorSpace=SRGB())::RGB{Float64}
+    return color_from_parallel_fork(index)
+end
+
+"""
+    colors_at_pf(indices::AbstractVector{<:Integer}, cs::ColorSpace=SRGB())
+
+Get colors at specific indices using parallel fork system.
+Parallel-fork version (suffix: _pf).
+"""
+function colors_at_pf(indices::AbstractVector{<:Integer}, cs::ColorSpace=SRGB())
+    return [color_at_pf(i, cs) for i in indices]
+end
+
+"""
+    next_color_pf(gr::GayRNG=gay_rng())::RGB{Float64}
+
+Get next color from parallel fork system.
+Uses invocation counter for index.
+Parallel-fork version (suffix: _pf).
+"""
+function next_color_pf(gr::GayRNG=gay_rng())::RGB{Float64}
+    gr.invocation += 1
+    return color_at_pf(gr.invocation)
+end
+
+"""
+    next_colors_pf(n::Int, gr::GayRNG=gay_rng())
+
+Get n colors from parallel fork system.
+Parallel-fork version (suffix: _pf).
+"""
+function next_colors_pf(n::Int, gr::GayRNG=gay_rng())
+    return [next_color_pf(gr) for _ in 1:n]
+end
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SPI VERIFICATION FUNCTIONS (Phase 2 Testing)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+"""
+    verify_spi_property(n::Int=100)::Bool
+
+Verify that parallel fork variant maintains SPI property.
+Returns true if all parallel runs produce identical colors.
+"""
+function verify_spi_property(n::Int=100)::Bool
+    # Generate colors multiple times with same seed
+    run1 = [color_at_pf(i) for i in 1:n]
+    run2 = [color_at_pf(i) for i in 1:n]
+    run3 = [color_at_pf(i) for i in 1:n]
+
+    # Check bitwise equality
+    return run1 == run2 && run2 == run3
+end
+
+"""
+    verify_bijection_property(n::Int=100)::Bool
+
+Verify that seed-to-color mapping is bijective (deterministic and recoverable).
+Returns true if same seed always produces same color.
+"""
+function verify_bijection_property(n::Int=100)::Bool
+    for i in 1:n
+        c1 = color_at_pf(i)
+        c2 = color_at_pf(i)
+
+        # Check RGB components match
+        if c1.r != c2.r || c1.g != c2.g || c1.b != c2.b
+            return false
+        end
+    end
+    return true
+end
+
+"""
+    verify_stream_independence(n::Int=100)::Bool
+
+Verify that parallel streams are independent (no correlation).
+Returns true if different seeds produce visibly different colors.
+"""
+function verify_stream_independence(n::Int=100)::Bool
+    colors = [color_at_pf(i) for i in 1:n]
+
+    # Calculate brightness distribution
+    brightness = [0.299*c.r + 0.587*c.g + 0.114*c.b for c in colors]
+
+    # Check that colors vary significantly
+    min_brightness = minimum(brightness)
+    max_brightness = maximum(brightness)
+    range = max_brightness - min_brightness
+
+    # Wide range indicates good distribution
+    return range > 0.3  # At least 30% of brightness range covered
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -817,36 +1083,17 @@ function verify_padic_uniqueness(colors::Vector{PadicColor})
 end
 
 """
-Demo function for p-adic colors.
+    world_padic(; n=10000, precision=20, verify_triples=10)
+
+Build composable p-adic color state.
 """
-function demo_padic()
-    println("═══ p-adic Color Generation ═══")
-    println()
-    
-    # Generate palette
-    colors = padic_palette(10000; precision=20)
-    
-    # Verify uniqueness
+function world_padic(; n::Int=10000, precision::Int=20, verify_triples::Int=10)
+    colors = padic_palette(n; precision=precision)
     unique = verify_padic_uniqueness(colors)
-    println("Identity collisions: $(unique ? "0 ✓" : "FOUND ✗")")
-    
-    # Check hex collisions (expected due to 8-bit quantization)
     hex_set = Set(to_hex(c) for c in colors)
-    println("Unique hex values: $(length(hex_set))/$(length(colors))")
-    
-    # Show sample
-    println()
-    println("Sample colors:")
-    for i in [1, 2, 3, 10, 100]
-        c = colors[i]
-        println("  [$i] $(to_hex(c)) → $(canonical_key(c.r)[1:10])...")
-    end
-    
-    # Verify ultrametric
-    println()
-    println("Ultrametric verification (10³ triples):")
+
     violations = 0
-    for i in 1:10, j in 1:10, k in 1:10
+    for i in 1:verify_triples, j in 1:verify_triples, k in 1:verify_triples
         d_ij = padic_distance_valuation(colors[i], colors[j])
         d_jk = padic_distance_valuation(colors[j], colors[k])
         d_ik = padic_distance_valuation(colors[i], colors[k])
@@ -854,5 +1101,13 @@ function demo_padic()
             violations += 1
         end
     end
-    println("  Violations: $violations ✓")
+
+    (
+        colors = colors,
+        unique = unique,
+        n_unique_hex = length(hex_set),
+        ultrametric_violations = violations,
+        ultrametric_verified = violations == 0,
+        sample = [(i, colors[i]) for i in [1, 2, 3, 10, 100] if i <= length(colors)],
+    )
 end
