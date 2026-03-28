@@ -9,9 +9,11 @@
 
 using KernelAbstractions
 using SplittableRandoms: SplittableRandom, split
+using Colors: RGB
 
 export ka_colors!, ka_colors, ka_palette!, ka_color_sums, ka_rgb_colors
 export ka_benchmark, KABackend, get_backend, CPU
+export splitmix64, hash_color, hash_color_rgb, hash_color_lch
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Backend selection
@@ -54,17 +56,55 @@ export set_backend!
 # Fast deterministic hash-based color generation
 # ═══════════════════════════════════════════════════════════════════════════
 
-"""
-    splitmix64(x::UInt64) -> UInt64
+# Use GOLDEN, MIX1, MIX2, splitmix64 from splittable.jl (included before kernels.jl)
 
-Fast high-quality hash function (SplitMix64 finalizer).
-Used for deterministic color generation in kernels.
 """
-@inline function splitmix64(x::UInt64)
-    x = xor(x, x >> 30) * 0xbf58476d1ce4e5b9
-    x = xor(x, x >> 27) * 0x94d049bb133111eb
-    xor(x, x >> 31)
+    splitmix64_mix(z::UInt64) -> UInt64
+
+Pure SplitMix64 mixing function (the finalizer part only).
+This is used for one-shot hashing where we combine seed and index.
+"""
+@inline function splitmix64_mix(z::UInt64)
+    z = ((z ⊻ (z >> 30)) * MIX1) % UInt64
+    z = ((z ⊻ (z >> 27)) * MIX2) % UInt64
+    (z ⊻ (z >> 31)) % UInt64
 end
+
+# splitmix64 is imported from splittable.jl
+
+"""
+    SplitMix64RNG
+
+Stateful SplitMix64 RNG matching Go/Python/Rust implementations.
+
+Key insight: state is incremented by GOLDEN, but the output is
+a mixing of the NEW state. The output is NOT used as the next state.
+
+# Example
+```julia
+rng = SplitMix64RNG(GAY_SEED)
+h0 = next!(rng)  # 0xf061ebbc2ca74d78
+h1 = next!(rng)  # 0x34dc5aa0b7117465
+```
+"""
+mutable struct SplitMix64RNG
+    state::UInt64
+end
+
+SplitMix64RNG(seed::Integer) = SplitMix64RNG(UInt64(seed))
+
+"""
+    next!(rng::SplitMix64RNG) -> UInt64
+
+Generate next random value, advancing internal state.
+State += GOLDEN, then mixes state (not the previous output).
+"""
+@inline function next!(rng::SplitMix64RNG)
+    rng.state = (rng.state + GOLDEN) % UInt64
+    splitmix64_mix(rng.state)
+end
+
+export SplitMix64RNG, next!, splitmix64_mix
 
 """
     hash_color(seed::UInt64, index::UInt64) -> (Float32, Float32, Float32)
@@ -82,6 +122,17 @@ Returns values in [0, 1] range.
     b = Float32((h >> 16) & 0xFF) / 255.0f0
     
     (r, g, b)
+end
+
+"""
+    hash_color_rgb(index::UInt64, seed::UInt64) -> RGB{Float32}
+
+Generate deterministic RGB{Float32} color from index and seed.
+Note: argument order is (index, seed) for consistency with color_at.
+"""
+@inline function hash_color_rgb(index::UInt64, seed::UInt64)
+    r, g, b = hash_color(seed, index)
+    RGB{Float32}(r, g, b)
 end
 
 """
@@ -408,7 +459,7 @@ function verify_spi(n::Int=1000, seed::Integer=GAY_SEED;
     
     println("1. CPU Sequential Reference")
     println("   XOR Fingerprint: 0x$(string(cpu_hash, base=16, pad=8))")
-    println("   ✓ Generated")
+    println("   ◆ Generated")
     println()
     
     # Test 2: CPU parallel (KernelAbstractions)
@@ -421,8 +472,8 @@ function verify_spi(n::Int=1000, seed::Integer=GAY_SEED;
     
     println("2. CPU Parallel (KernelAbstractions)")
     println("   XOR Fingerprint: 0x$(string(ka_hash, base=16, pad=8))")
-    println("   Colors match: ", match ? "✓ PASS" : "✗ FAIL")
-    println("   Fingerprint match: ", hash_match ? "✓ PASS" : "✗ FAIL")
+    println("   Colors match: ", match ? "◆ PASS" : "◇ FAIL")
+    println("   Fingerprint match: ", hash_match ? "◆ PASS" : "◇ FAIL")
     @assert match "CPU sequential != CPU parallel"
     @assert hash_match "Fingerprint mismatch: CPU sequential vs parallel"
     println()
@@ -434,7 +485,7 @@ function verify_spi(n::Int=1000, seed::Integer=GAY_SEED;
         ka_colors!(ws_colors, seed; backend=CPU(), workgroup=ws)
         ws_match = isapprox(cpu_colors, ws_colors; rtol=rtol)
         print("   workgroup=$ws: ")
-        println(ws_match ? "✓ PASS" : "✗ FAIL")
+        println(ws_match ? "◆ PASS" : "◇ FAIL")
         @assert ws_match "Workgroup $ws produced different results"
     end
     println()
@@ -459,8 +510,8 @@ function verify_spi(n::Int=1000, seed::Integer=GAY_SEED;
         gpu_hash_match = cpu_hash == gpu_hash
         
         println("   XOR Fingerprint: 0x$(string(gpu_hash, base=16, pad=8))")
-        println("   Colors match CPU: ", gpu_match ? "✓ PASS" : "✗ FAIL")
-        println("   Fingerprint match CPU: ", gpu_hash_match ? "✓ PASS" : "✗ FAIL")
+        println("   Colors match CPU: ", gpu_match ? "◆ PASS" : "◇ FAIL")
+        println("   Fingerprint match CPU: ", gpu_hash_match ? "◆ PASS" : "◇ FAIL")
         
         if !gpu_match
             # Find first mismatch for debugging
@@ -492,13 +543,13 @@ function verify_spi(n::Int=1000, seed::Integer=GAY_SEED;
         test_hash = xor_fingerprint(test_colors)
         match = test_hash == cpu_hash
         print("   Run $run: ")
-        println(match ? "✓ PASS (0x$(string(test_hash, base=16, pad=8)))" : "✗ FAIL")
+        println(match ? "◆ PASS (0x$(string(test_hash, base=16, pad=8)))" : "◇ FAIL")
         @assert match "Run $run produced different fingerprint"
     end
     println()
     
     println("═" ^ 60)
-    println("ALL SPI INVARIANTS VERIFIED ✓")
+    println("ALL SPI INVARIANTS VERIFIED ◆")
     println("═" ^ 60)
     
     return true

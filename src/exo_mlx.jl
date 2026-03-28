@@ -259,10 +259,10 @@ function verify_device!(verifier::ExoVerifier, device_id::Int,
     device = verifier.cluster.devices[device_id + 1]
     
     if actual_fp == expected_fp
-        @info "✓ $(device.name) verified" layers=device.layer_range fp=string(actual_fp, base=16, pad=8)
+        @info "◆ $(device.name) verified" layers=device.layer_range fp=string(actual_fp, base=16, pad=8)
         return true
     else
-        @error "✗ $(device.name) FAILED" layers=device.layer_range 
+        @error "◇ $(device.name) FAILED" layers=device.layer_range 
                expected=string(expected_fp, base=16, pad=8)
                actual=string(actual_fp, base=16, pad=8)
         return false
@@ -287,10 +287,10 @@ function verify_cluster(verifier::ExoVerifier)
     expected_total = reduce(⊻, values(verifier.expected_fps))
     
     if actual_total == expected_total
-        @info "✓ Cluster verified" total_fp=string(actual_total, base=16, pad=8)
+        @info "◆ Cluster verified" total_fp=string(actual_total, base=16, pad=8)
         return true
     else
-        @error "✗ Cluster verification FAILED"
+        @error "◇ Cluster verification FAILED"
                expected=string(expected_total, base=16, pad=8)
                actual=string(actual_total, base=16, pad=8)
         return false
@@ -321,7 +321,7 @@ function inject_spi_colors(hidden_states::Matrix{Float32}, layer::Int;
                               (UInt64(d) * 0xc4ceb9fe1a85ec53)
             r, _, _ = hash_color(h, UInt64(t))
             # Tiny additive color (doesn't affect model output significantly)
-            colored[t, d] += r * 1e-7f0
+            colored[t, d] += r * Float32(1e-7)
         end
     end
     
@@ -470,7 +470,7 @@ function verify_exo_inference(cluster::ExoCluster, prompt::String;
         # For demo: generate expected fingerprint
         fp = verifier.expected_fps[i-1]
         verifier.actual_fps[i-1] = fp  # Would be actual in production
-        println("   $(d.name): 0x$(string(fp, base=16, pad=8)) ✓")
+        println("   $(d.name): 0x$(string(fp, base=16, pad=8)) ◆")
     end
     println()
     
@@ -480,7 +480,7 @@ function verify_exo_inference(cluster::ExoCluster, prompt::String;
     println()
     
     println("═" ^ 70)
-    println(cluster_ok ? "VERIFICATION PASSED ✓" : "VERIFICATION FAILED ✗")
+    println(cluster_ok ? "VERIFICATION PASSED ◆" : "VERIFICATION FAILED ◇")
     println("═" ^ 70)
     
     cluster_ok

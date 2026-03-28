@@ -1,4 +1,4 @@
-# Gay.jl 🏳️‍🌈
+# Gay.jl ◈
 
 Wide-gamut color sampling with **splittable determinism** — reproducible colors via [SplittableRandoms.jl](https://github.com/Julia-Tempering/SplittableRandoms.jl), inspired by [Pigeons.jl](https://pigeons.run)'s Strong Parallelism Invariance (SPI) pattern.
 
@@ -78,7 +78,7 @@ colors_at([1, 10, 100])  # Batch access
 palette_at(5, 6)         # 6-color palette at index 5
 ```
 
-### 🏳️‍🌈 Pride Flag Palettes
+### ◈ Pride Flag Palettes
 ```julia
 rainbow()                # 6-color rainbow
 transgender()            # Trans flag colors
@@ -183,9 +183,9 @@ render_pi_spiral(seed=314159, colorspace=Rec2020())
 
 **Shared properties with Gay.jl:**
 ```
-✓ Same seed always produces same colors
-✓ Parallel execution is reproducible  
-✓ Random access by index is efficient
+◆ Same seed always produces same colors
+◆ Parallel execution is reproducible  
+◆ Random access by index is efficient
 ```
 
 ## Black Hole Imaging Demo
@@ -401,27 +401,27 @@ SPI VERIFICATION: Strong Parallelism Invariance
 
 1. CPU Sequential Reference
    XOR Fingerprint: 0x043aba9b
-   ✓ Generated
+   ◆ Generated
 
 2. CPU Parallel (KernelAbstractions)
    XOR Fingerprint: 0x043aba9b
-   Colors match: ✓ PASS
-   Fingerprint match: ✓ PASS
+   Colors match: ◆ PASS
+   Fingerprint match: ◆ PASS
 
 3. Workgroup Size Independence
-   workgroup=32: ✓ PASS
-   workgroup=64: ✓ PASS
-   workgroup=128: ✓ PASS
-   workgroup=256: ✓ PASS
-   workgroup=512: ✓ PASS
+   workgroup=32: ◆ PASS
+   workgroup=64: ◆ PASS
+   workgroup=128: ◆ PASS
+   workgroup=256: ◆ PASS
+   workgroup=512: ◆ PASS
 
 4. GPU Backend: MetalBackend
    XOR Fingerprint: 0x043aba9b
-   Colors match CPU: ✓ PASS
-   Fingerprint match CPU: ✓ PASS
+   Colors match CPU: ◆ PASS
+   Fingerprint match CPU: ◆ PASS
 
 ════════════════════════════════════════════════════════════
-ALL SPI INVARIANTS VERIFIED ✓
+ALL SPI INVARIANTS VERIFIED ◆
 ════════════════════════════════════════════════════════════
 ```
 
@@ -455,11 +455,11 @@ This is how Gay.jl guarantees that the 1069 parallel-generated sky models in the
 ## Code Quality
 
 Tested with [Aqua.jl](https://github.com/JuliaTesting/Aqua.jl) for:
-- ✅ No method ambiguities
-- ✅ No unbound type parameters
-- ✅ No undefined exports
-- ✅ No stale dependencies
-- ✅ Proper compat bounds
+- ▣ No method ambiguities
+- ▣ No unbound type parameters
+- ▣ No undefined exports
+- ▣ No stale dependencies
+- ▣ Proper compat bounds
 
 ## License
 
@@ -483,4 +483,14 @@ This commit hash contains **69**! Celebratory black hole:
 
 ```
 [38;2;214;181;144m([0mring 0.69 0.169[38;2;214;181;144m)[0m[38;2;228;3;3m [38;2;255;140;0m+[38;2;255;237;0m [0m[38;2;0;77;151m([0mgaussian 0.42 0.42[38;2;0;77;151m)[0m[38;2;228;3;3m [38;2;255;140;0m+[38;2;255;237;0m [0m[38;2;176;175;176m([0mring 1.069 0.269[38;2;176;175;176m)[0m
+```
+
+---
+
+## 🎉 Nice Commit: 2a7704f91413396abca659adf4ffe696f39b0156
+
+This commit hash contains **69**! Celebratory black hole:
+
+```
+[38;2;214;181;144m([0mring 0.69 0.169[38;2;214;181;144m)[0m [38;2;25;63;230m+[0m [38;2;0;77;151m([0mgaussian 0.42 0.42[38;2;0;77;151m)[0m [38;2;25;63;230m+[0m [38;2;176;175;176m([0mring 1.069 0.269[38;2;176;175;176m)[0m
 ```
